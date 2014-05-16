@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel 10 Gigabit PCI Express Linux driver
-  Copyright(c) 1999 - 2012 Intel Corporation.
+  Copyright(c) 1999 - 2013 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -29,6 +29,8 @@
 #define _IXGBE_API_H_
 
 #include "ixgbe_type.h"
+
+void ixgbe_dcb_get_rtrup2tc(struct ixgbe_hw *hw, u8 *map);
 
 s32 ixgbe_init_shared_code(struct ixgbe_hw *hw);
 
@@ -62,13 +64,12 @@ s32 ixgbe_check_phy_link(struct ixgbe_hw *hw,
 			 bool *link_up);
 s32 ixgbe_setup_phy_link_speed(struct ixgbe_hw *hw,
 			       ixgbe_link_speed speed,
-			       bool autoneg,
 			       bool autoneg_wait_to_complete);
 void ixgbe_disable_tx_laser(struct ixgbe_hw *hw);
 void ixgbe_enable_tx_laser(struct ixgbe_hw *hw);
 void ixgbe_flap_tx_laser(struct ixgbe_hw *hw);
 s32 ixgbe_setup_link(struct ixgbe_hw *hw, ixgbe_link_speed speed,
-		     bool autoneg, bool autoneg_wait_to_complete);
+		     bool autoneg_wait_to_complete);
 s32 ixgbe_check_link(struct ixgbe_hw *hw, ixgbe_link_speed *speed,
 		     bool *link_up, bool link_up_wait_to_complete);
 s32 ixgbe_get_link_capabilities(struct ixgbe_hw *hw, ixgbe_link_speed *speed,
@@ -94,6 +95,7 @@ s32 ixgbe_set_rar(struct ixgbe_hw *hw, u32 index, u8 *addr, u32 vmdq,
 		  u32 enable_addr);
 s32 ixgbe_clear_rar(struct ixgbe_hw *hw, u32 index);
 s32 ixgbe_set_vmdq(struct ixgbe_hw *hw, u32 rar, u32 vmdq);
+s32 ixgbe_set_vmdq_san_mac(struct ixgbe_hw *hw, u32 vmdq);
 s32 ixgbe_clear_vmdq(struct ixgbe_hw *hw, u32 rar, u32 vmdq);
 s32 ixgbe_init_rx_addrs(struct ixgbe_hw *hw);
 u32 ixgbe_get_num_rx_addrs(struct ixgbe_hw *hw);
@@ -110,7 +112,7 @@ s32 ixgbe_set_vfta(struct ixgbe_hw *hw, u32 vlan,
 		   u32 vind, bool vlan_on);
 s32 ixgbe_set_vlvf(struct ixgbe_hw *hw, u32 vlan, u32 vind,
 		   bool vlan_on, bool *vfta_changed);
-s32 ixgbe_fc_enable(struct ixgbe_hw *hw, s32 packetbuf_num);
+s32 ixgbe_fc_enable(struct ixgbe_hw *hw);
 s32 ixgbe_set_fw_drv_ver(struct ixgbe_hw *hw, u8 maj, u8 min, u8 build,
 			 u8 ver);
 s32 ixgbe_get_thermal_sensor_data(struct ixgbe_hw *hw);
@@ -126,6 +128,7 @@ u32 ixgbe_get_supported_physical_layer(struct ixgbe_hw *hw);
 s32 ixgbe_enable_rx_dma(struct ixgbe_hw *hw, u32 regval);
 s32 ixgbe_disable_sec_rx_path(struct ixgbe_hw *hw);
 s32 ixgbe_enable_sec_rx_path(struct ixgbe_hw *hw);
+s32 ixgbe_mng_fw_enabled(struct ixgbe_hw *hw);
 s32 ixgbe_reinit_fdir_tables_82599(struct ixgbe_hw *hw);
 s32 ixgbe_init_fdir_signature_82599(struct ixgbe_hw *hw, u32 fdirctrl);
 s32 ixgbe_init_fdir_perfect_82599(struct ixgbe_hw *hw, u32 fdirctrl);
@@ -150,6 +153,7 @@ void ixgbe_atr_compute_perfect_hash_82599(union ixgbe_atr_input *input,
 					  union ixgbe_atr_input *mask);
 u32 ixgbe_atr_compute_sig_hash_82599(union ixgbe_atr_hash_dword input,
 				     union ixgbe_atr_hash_dword common);
+bool ixgbe_verify_lesm_fw_enabled_82599(struct ixgbe_hw *hw);
 s32 ixgbe_read_i2c_byte(struct ixgbe_hw *hw, u8 byte_offset, u8 dev_addr,
 			u8 *data);
 s32 ixgbe_write_i2c_byte(struct ixgbe_hw *hw, u8 byte_offset, u8 dev_addr,

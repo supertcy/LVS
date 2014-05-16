@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel 10 Gigabit PCI Express Linux driver
-  Copyright(c) 1999 - 2012 Intel Corporation.
+  Copyright(c) 1999 - 2013 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -101,8 +101,10 @@ struct ixgbe_dcb_tc_config {
 };
 
 enum ixgbe_dcb_pba {
-	ixgbe_dcb_pba_equal, /* PBA[0-7] each use 64KB FIFO */
-	ixgbe_dcb_pba_80_48 /* PBA[0-3] each use 80KB, PBA[4-7] each use 48KB */
+	/* PBA[0-7] each use 64KB FIFO */
+	ixgbe_dcb_pba_equal = PBA_STRATEGY_EQUAL,
+	/* PBA[0-3] each use 80KB, PBA[4-7] each use 48KB */
+	ixgbe_dcb_pba_80_48 = PBA_STRATEGY_WEIGHTED
 };
 
 struct ixgbe_dcb_num_tcs {
@@ -159,6 +161,7 @@ void ixgbe_dcb_unpack_max_cee(struct ixgbe_dcb_config *, u16 *);
 void ixgbe_dcb_unpack_bwgid_cee(struct ixgbe_dcb_config *, int, u8 *);
 void ixgbe_dcb_unpack_tsa_cee(struct ixgbe_dcb_config *, int, u8 *);
 void ixgbe_dcb_unpack_map_cee(struct ixgbe_dcb_config *, int, u8 *);
+u8 ixgbe_dcb_get_tc_from_up(struct ixgbe_dcb_config *, int, u8);
 
 /* DCB initialization */
 s32 ixgbe_dcb_hw_config(struct ixgbe_hw *, u16 *, u16 *, u8 *, u8 *, u8 *);

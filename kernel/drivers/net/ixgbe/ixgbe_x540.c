@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel 10 Gigabit PCI Express Linux driver
-  Copyright(c) 1999 - 2012 Intel Corporation.
+  Copyright(c) 1999 - 2013 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -31,7 +31,6 @@
 #include "ixgbe_common.h"
 #include "ixgbe_phy.h"
 
-static s32 ixgbe_update_flash_X540(struct ixgbe_hw *hw);
 static s32 ixgbe_poll_flash_update_done_X540(struct ixgbe_hw *hw);
 static s32 ixgbe_get_swfw_sync_semaphore(struct ixgbe_hw *hw);
 static void ixgbe_release_swfw_sync_semaphore(struct ixgbe_hw *hw);
@@ -88,6 +87,7 @@ s32 ixgbe_init_ops_X540(struct ixgbe_hw *hw)
 
 	/* RAR, Multicast, VLAN */
 	mac->ops.set_vmdq = &ixgbe_set_vmdq_generic;
+	mac->ops.set_vmdq_san_mac = &ixgbe_set_vmdq_san_mac_generic;
 	mac->ops.clear_vmdq = &ixgbe_clear_vmdq_generic;
 	mac->ops.insert_mac_addr = &ixgbe_insert_mac_addr_generic;
 	mac->rar_highwater = 1;
@@ -104,6 +104,10 @@ s32 ixgbe_init_ops_X540(struct ixgbe_hw *hw)
 	mac->ops.setup_link = &ixgbe_setup_mac_link_X540;
 	mac->ops.setup_rxpba = &ixgbe_set_rxpba_generic;
 	mac->ops.check_link = &ixgbe_check_mac_link_generic;
+
+	mac->ops.get_thermal_sensor_data = &ixgbe_get_thermal_sensor_data_X540;
+	mac->ops.init_thermal_sensor_thresh =
+		&ixgbe_init_thermal_sensor_thresh_X540;
 
 	mac->mcft_size		= 128;
 	mac->vft_size		= 128;
@@ -129,6 +133,8 @@ s32 ixgbe_init_ops_X540(struct ixgbe_hw *hw)
 
 	/* Manageability interface */
 	mac->ops.set_fw_drv_ver = &ixgbe_set_fw_drv_ver_generic;
+
+	mac->ops.get_rtrup2tc = &ixgbe_dcb_get_rtrup2tc_generic;
 
 	return ret_val;
 }
@@ -165,15 +171,13 @@ enum ixgbe_media_type ixgbe_get_media_type_X540(struct ixgbe_hw *hw)
  *  ixgbe_setup_mac_link_X540 - Sets the auto advertised capabilities
  *  @hw: pointer to hardware structure
  *  @speed: new link speed
- *  @autoneg: true if autonegotiation enabled
  *  @autoneg_wait_to_complete: true when waiting for completion is needed
  **/
 s32 ixgbe_setup_mac_link_X540(struct ixgbe_hw *hw,
-			      ixgbe_link_speed speed, bool autoneg,
+			      ixgbe_link_speed speed,
 			      bool autoneg_wait_to_complete)
 {
-	return hw->phy.ops.setup_link_speed(hw, speed, autoneg,
-					    autoneg_wait_to_complete);
+	return hw->phy.ops.setup_link_speed(hw, speed, autoneg_wait_to_complete);
 }
 
 /**
@@ -212,7 +216,8 @@ mac_reset_top:
 
 	if (ctrl & IXGBE_CTRL_RST_MASK) {
 		status = IXGBE_ERR_RESET_FAILED;
-		hw_dbg(hw, "Reset polling failed to complete.\n");
+		ERROR_REPORT1(IXGBE_ERROR_POLLING,
+			     "Reset polling failed to complete.\n");
 	}
 	msleep(100);
 
@@ -247,6 +252,9 @@ mac_reset_top:
 	if (ixgbe_validate_mac_addr(hw->mac.san_addr) == 0) {
 		hw->mac.ops.set_rar(hw, hw->mac.num_rar_entries - 1,
 				    hw->mac.san_addr, 0, IXGBE_RAH_AV);
+
+		/* Save the SAN MAC RAR index */
+		hw->mac.san_mac_rar_index = hw->mac.num_rar_entries - 1;
 
 		/* Reserve the last RAR for the SAN MAC address */
 		hw->mac.num_rar_entries--;
@@ -348,12 +356,13 @@ s32 ixgbe_read_eerd_X540(struct ixgbe_hw *hw, u16 offset, u16 *data)
 	s32 status = 0;
 
 	if (hw->mac.ops.acquire_swfw_sync(hw, IXGBE_GSSR_EEP_SM) ==
-	    0)
+	    0) {
 		status = ixgbe_read_eerd_generic(hw, offset, data);
-	else
+		hw->mac.ops.release_swfw_sync(hw, IXGBE_GSSR_EEP_SM);
+	} else {
 		status = IXGBE_ERR_SWFW_SYNC;
+	}
 
-	hw->mac.ops.release_swfw_sync(hw, IXGBE_GSSR_EEP_SM);
 	return status;
 }
 
@@ -372,13 +381,14 @@ s32 ixgbe_read_eerd_buffer_X540(struct ixgbe_hw *hw,
 	s32 status = 0;
 
 	if (hw->mac.ops.acquire_swfw_sync(hw, IXGBE_GSSR_EEP_SM) ==
-	    0)
+	    0) {
 		status = ixgbe_read_eerd_buffer_generic(hw, offset,
 							words, data);
-	else
+		hw->mac.ops.release_swfw_sync(hw, IXGBE_GSSR_EEP_SM);
+	} else {
 		status = IXGBE_ERR_SWFW_SYNC;
+	}
 
-	hw->mac.ops.release_swfw_sync(hw, IXGBE_GSSR_EEP_SM);
 	return status;
 }
 
@@ -395,12 +405,13 @@ s32 ixgbe_write_eewr_X540(struct ixgbe_hw *hw, u16 offset, u16 data)
 	s32 status = 0;
 
 	if (hw->mac.ops.acquire_swfw_sync(hw, IXGBE_GSSR_EEP_SM) ==
-	    0)
+	    0) {
 		status = ixgbe_write_eewr_generic(hw, offset, data);
-	else
+		hw->mac.ops.release_swfw_sync(hw, IXGBE_GSSR_EEP_SM);
+	} else {
 		status = IXGBE_ERR_SWFW_SYNC;
+	}
 
-	hw->mac.ops.release_swfw_sync(hw, IXGBE_GSSR_EEP_SM);
 	return status;
 }
 
@@ -419,13 +430,14 @@ s32 ixgbe_write_eewr_buffer_X540(struct ixgbe_hw *hw,
 	s32 status = 0;
 
 	if (hw->mac.ops.acquire_swfw_sync(hw, IXGBE_GSSR_EEP_SM) ==
-	    0)
+	    0) {
 		status = ixgbe_write_eewr_buffer_generic(hw, offset,
 							 words, data);
-	else
+		hw->mac.ops.release_swfw_sync(hw, IXGBE_GSSR_EEP_SM);
+	} else {
 		status = IXGBE_ERR_SWFW_SYNC;
+	}
 
-	hw->mac.ops.release_swfw_sync(hw, IXGBE_GSSR_EEP_SM);
 	return status;
 }
 
@@ -547,17 +559,20 @@ s32 ixgbe_validate_eeprom_checksum_X540(struct ixgbe_hw *hw,
 		 * Verify read checksum from EEPROM is the same as
 		 * calculated checksum
 		 */
-		if (read_checksum != checksum)
+		if (read_checksum != checksum) {
 			status = IXGBE_ERR_EEPROM_CHECKSUM;
+			ERROR_REPORT1(IXGBE_ERROR_INVALID_STATE,
+				     "Invalid EEPROM checksum");
+		}
 
 		/* If the user cares, return the calculated checksum */
 		if (checksum_val)
 			*checksum_val = checksum;
+		hw->mac.ops.release_swfw_sync(hw, IXGBE_GSSR_EEP_SM);
 	} else {
 		status = IXGBE_ERR_SWFW_SYNC;
 	}
 
-	hw->mac.ops.release_swfw_sync(hw, IXGBE_GSSR_EEP_SM);
 out:
 	return status;
 }
@@ -596,13 +611,12 @@ s32 ixgbe_update_eeprom_checksum_X540(struct ixgbe_hw *hw)
 		status = ixgbe_write_eewr_generic(hw, IXGBE_EEPROM_CHECKSUM,
 						  checksum);
 
-	if (status == 0)
-		status = ixgbe_update_flash_X540(hw);
-	else
+		if (status == 0)
+			status = ixgbe_update_flash_X540(hw);
+		hw->mac.ops.release_swfw_sync(hw, IXGBE_GSSR_EEP_SM);
+	} else {
 		status = IXGBE_ERR_SWFW_SYNC;
 	}
-
-	hw->mac.ops.release_swfw_sync(hw, IXGBE_GSSR_EEP_SM);
 
 	return status;
 }
@@ -614,7 +628,7 @@ s32 ixgbe_update_eeprom_checksum_X540(struct ixgbe_hw *hw)
  *  Set FLUP (bit 23) of the EEC register to instruct Hardware to copy
  *  EEPROM from shadow RAM to the flash device.
  **/
-static s32 ixgbe_update_flash_X540(struct ixgbe_hw *hw)
+s32 ixgbe_update_flash_X540(struct ixgbe_hw *hw)
 {
 	u32 flup;
 	s32 status = IXGBE_ERR_EEPROM;
@@ -634,7 +648,7 @@ static s32 ixgbe_update_flash_X540(struct ixgbe_hw *hw)
 	else
 		hw_dbg(hw, "Flash update time out\n");
 
-	if (hw->revision_id == 0) {
+	if (hw->mac.type == ixgbe_mac_X540 && hw->revision_id == 0) {
 		flup = IXGBE_READ_REG(hw, IXGBE_EEC);
 
 		if (flup & IXGBE_EEC_SEC1VAL) {
@@ -673,6 +687,11 @@ static s32 ixgbe_poll_flash_update_done_X540(struct ixgbe_hw *hw)
 		}
 		udelay(5);
 	}
+
+	if (i == IXGBE_FLUDONE_ATTEMPTS)
+		ERROR_REPORT1(IXGBE_ERROR_POLLING,
+			     "Flash update status polling timed out");
+
 	return status;
 }
 
@@ -732,11 +751,13 @@ s32 ixgbe_acquire_swfw_sync_X540(struct ixgbe_hw *hw, u16 mask)
 	/* Failed to get SW only semaphore */
 	if (swmask == IXGBE_GSSR_SW_MNG_SM) {
 		ret_val = IXGBE_ERR_SWFW_SYNC;
+		ERROR_REPORT1(IXGBE_ERROR_POLLING,
+			     "Failed to get SW only semaphore");
 		goto out;
 	}
 
 	/* If the resource is not released by the FW/HW the SW can assume that
-	 * the FW/HW malfunctions. In that case the SW should sets the SW bit(s)
+	 * the FW/HW malfunctions. In that case the SW should set the SW bit(s)
 	 * of the requested resource(s) while ignoring the corresponding FW/HW
 	 * bits in the SW_FW_SYNC register.
 	 */
@@ -752,6 +773,17 @@ s32 ixgbe_acquire_swfw_sync_X540(struct ixgbe_hw *hw, u16 mask)
 		ixgbe_release_swfw_sync_semaphore(hw);
 		msleep(5);
 	}
+	/* If the resource is not released by other SW the SW can assume that
+	 * the other SW malfunctions. In that case the SW should clear all SW
+	 * flags that it does not own and then repeat the whole process once
+	 * again.
+	 */
+	else if (swfw_sync & swmask) {
+		ixgbe_release_swfw_sync_X540(hw, IXGBE_GSSR_EEP_SM |
+			IXGBE_GSSR_PHY0_SM | IXGBE_GSSR_PHY1_SM |
+			IXGBE_GSSR_MAC_CSR_SM);
+		ret_val = IXGBE_ERR_SWFW_SYNC;
+	}
 
 out:
 	return ret_val;
@@ -762,7 +794,7 @@ out:
  *  @hw: pointer to hardware structure
  *  @mask: Mask to specify which semaphore to release
  *
- *  Releases the SWFW semaphore throught the SW_FW_SYNC register
+ *  Releases the SWFW semaphore through the SW_FW_SYNC register
  *  for the specified function (CSR, PHY0, PHY1, EVM, Flash)
  **/
 void ixgbe_release_swfw_sync_X540(struct ixgbe_hw *hw, u16 mask)
@@ -822,14 +854,15 @@ static s32 ixgbe_get_swfw_sync_semaphore(struct ixgbe_hw *hw)
 		 * was not granted because we don't have access to the EEPROM
 		 */
 		if (i >= timeout) {
-			hw_dbg(hw, "REGSMP Software NVM semaphore not "
-				 "granted.\n");
+			ERROR_REPORT1(IXGBE_ERROR_POLLING,
+				"REGSMP Software NVM semaphore not granted.\n");
 			ixgbe_release_swfw_sync_semaphore(hw);
 			status = IXGBE_ERR_EEPROM;
 		}
 	} else {
-		hw_dbg(hw, "Software semaphore SMBI between device drivers "
-			 "not granted.\n");
+		ERROR_REPORT1(IXGBE_ERROR_POLLING,
+			     "Software semaphore SMBI between device drivers "
+			     "not granted.\n");
 	}
 
 	return status;
@@ -921,5 +954,87 @@ s32 ixgbe_blink_led_stop_X540(struct ixgbe_hw *hw, u32 index)
 	IXGBE_WRITE_FLUSH(hw);
 
 	return 0;
+}
+
+/**
+ *  ixgbe_get_thermal_sensor_data - Gathers thermal sensor data for X540
+ *  @hw: pointer to hardware structure
+ *
+ *  Returns the X540 thermal sensor data structure
+ **/
+s32 ixgbe_get_thermal_sensor_data_X540(struct ixgbe_hw *hw)
+{
+	s32 status = 0;
+	u16 phy_val = 0;
+	struct ixgbe_thermal_sensor_data *data = &hw->mac.thermal_sensor_data;
+
+	/* Only support thermal sensors on physical port 0 */
+	if (hw->mac.type != ixgbe_mac_X540 ||
+	    IXGBE_READ_REG(hw, IXGBE_STATUS) & IXGBE_STATUS_LAN_ID_1) {
+		status = IXGBE_NOT_IMPLEMENTED;
+		goto out;
+	}
+
+	/* Check if thermal sensor is not disabled in NVM */
+	if (!hw->mac.thermal_sensor_enabled) {
+		status = IXGBE_ERR_FEATURE_NOT_SUPPORTED;
+		goto out;
+	}
+
+	/* Get the X540 internal thermal sensor reading */
+	status = hw->phy.ops.read_reg(hw, IXGBE_TEMP_VALUE_ADDR_X540,
+		IXGBE_TEMP_STATUS_PAGE_X540, &phy_val);
+
+	if (0 == status)
+		data->sensor[0].temp = (u8)(phy_val >> 8);
+
+out:
+	return status;
+}
+
+/**
+ *  ixgbe_init_thermal_sensor_thresh_X540
+ *  @hw: pointer to hardware structure
+ *
+ *  Init the X540 threshold and location values into mac.thermal_sensor_data
+ **/
+s32 ixgbe_init_thermal_sensor_thresh_X540(struct ixgbe_hw *hw)
+{
+	s32 status = 0;
+	u16 fail_thresh = 0, warn_thresh = 0;
+	struct ixgbe_thermal_sensor_data *data = &hw->mac.thermal_sensor_data;
+
+	memset(data, 0, sizeof(struct ixgbe_thermal_sensor_data));
+
+	/* Only support thermal sensors on physical port 0 */
+	if (hw->mac.type != ixgbe_mac_X540 ||
+	    IXGBE_READ_REG(hw, IXGBE_STATUS) & IXGBE_STATUS_LAN_ID_1) {
+		status = IXGBE_NOT_IMPLEMENTED;
+		goto out;
+	}
+
+	if (!hw->mac.thermal_sensor_enabled) {
+		status = IXGBE_ERR_FEATURE_NOT_SUPPORTED;
+		goto out;
+	}
+
+	status = hw->phy.ops.read_reg(hw, IXGBE_TEMP_PROV_2_ADDR_X540,
+		IXGBE_TEMP_STATUS_PAGE_X540, &fail_thresh);
+
+	if (0 != status)
+		goto out;
+
+	status = hw->phy.ops.read_reg(hw, IXGBE_TEMP_PROV_4_ADDR_X540,
+		IXGBE_TEMP_STATUS_PAGE_X540, &warn_thresh);
+
+	if (0 != status)
+		goto out;
+
+	data->sensor[0].location = 0x1;
+	data->sensor[0].caution_thresh = (u8)(fail_thresh >> 8);
+	data->sensor[0].max_op_thresh = (u8)(warn_thresh >> 8);
+
+out:
+	return status;
 }
 

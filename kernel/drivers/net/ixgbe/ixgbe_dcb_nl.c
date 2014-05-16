@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel 10 Gigabit PCI Express Linux driver
-  Copyright(c) 1999 - 2012 Intel Corporation.
+  Copyright(c) 1999 - 2013 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -46,103 +46,98 @@
 #define DCB_NO_HW_CHG	1  /* DCB configuration did not change */
 #define DCB_HW_CHG	2  /* DCB configuration changed, no reset */
 
-/**
- * ixgbe_get_tc_from_up - get the TC UP is mapped to
- * @netdev : the corresponding netdev
- * @up: the 802.1p user priority value
- *
- * Returns : TC, UP is mapped to
- */
-static u8 ixgbe_get_tc_from_up(struct net_device *netdev, u8 up)
+int ixgbe_copy_dcb_cfg(struct ixgbe_adapter *adapter, int tc_max)
 {
-	struct ixgbe_adapter *adapter;
-	u32 up2tc, i;
+	struct ixgbe_dcb_config *scfg = &adapter->temp_dcb_cfg;
+	struct ixgbe_dcb_config *dcfg = &adapter->dcb_cfg;
+	struct ixgbe_dcb_tc_config *src = NULL;
+	struct ixgbe_dcb_tc_config *dst = NULL;
+	int i, j;
+	int tx = IXGBE_DCB_TX_CONFIG;
+	int rx = IXGBE_DCB_RX_CONFIG;
+	int changes = 0;
 
-	adapter = netdev_priv(netdev);
+#ifdef IXGBE_FCOE
+	if (adapter->fcoe.up_set != adapter->fcoe.up)
+		changes |= BIT_APP_UPCHG;
 
-	/* if up to tc mapping change is pending then use the cache */
-	if (adapter->dcb_set_bitmap & BIT_PG_RX) {
-		struct ixgbe_dcb_tc_config *tc_cfg;
-		for (i = 0; i < IXGBE_DCB_MAX_TRAFFIC_CLASS; i++) {
-			tc_cfg = &adapter->temp_dcb_cfg.tc_config[i];
-			if (tc_cfg->path[0].up_to_tc_bitmap & (1 << up))
-				return i;
-		}
-	} else {
-		/* from user priority to the corresponding traffic class */
-		switch (adapter->hw.mac.type) {
-		case ixgbe_mac_82599EB:
-		case ixgbe_mac_X540:
-			up2tc = IXGBE_READ_REG(&adapter->hw, IXGBE_RTRUP2TC);
-			up2tc >>= (up * IXGBE_RTRUP2TC_UP_SHIFT);
-			up2tc &= (IXGBE_DCB_MAX_TRAFFIC_CLASS - 1);
-			break;
-		default:
-			up2tc = up;
-			break;
-		}
-
-		return (u8)up2tc;
-	}
-	return 0;
-}
-
-
-int ixgbe_copy_dcb_cfg(struct ixgbe_dcb_config *src_dcb_cfg,
-		       struct ixgbe_dcb_config *dst_dcb_cfg, int tc_max)
-{
-	struct ixgbe_dcb_tc_config *src_tc_cfg = NULL;
-	struct ixgbe_dcb_tc_config *dst_tc_cfg = NULL;
-	int i;
-
-	if (!src_dcb_cfg || !dst_dcb_cfg)
-		return -EINVAL;
-
+#endif /* IXGBE_FCOE */
 	for (i = DCB_PG_ATTR_TC_0; i < tc_max + DCB_PG_ATTR_TC_0; i++) {
-		src_tc_cfg = &src_dcb_cfg->tc_config[i - DCB_PG_ATTR_TC_0];
-		dst_tc_cfg = &dst_dcb_cfg->tc_config[i - DCB_PG_ATTR_TC_0];
+		src = &scfg->tc_config[i - DCB_PG_ATTR_TC_0];
+		dst = &dcfg->tc_config[i - DCB_PG_ATTR_TC_0];
 
-		dst_tc_cfg->path[IXGBE_DCB_TX_CONFIG].tsa =
-			src_tc_cfg->path[IXGBE_DCB_TX_CONFIG].tsa;
+		if (dst->path[tx].tsa != src->path[tx].tsa) {
+			dst->path[tx].tsa = src->path[tx].tsa;
+			changes |= BIT_PG_TX;
+		}
 
-		dst_tc_cfg->path[IXGBE_DCB_TX_CONFIG].bwg_id =
-			src_tc_cfg->path[IXGBE_DCB_TX_CONFIG].bwg_id;
+		if (dst->path[tx].bwg_id != src->path[tx].bwg_id) {
+			dst->path[tx].bwg_id = src->path[tx].bwg_id;
+			changes |= BIT_PG_TX;
+		}
 
-		dst_tc_cfg->path[IXGBE_DCB_TX_CONFIG].bwg_percent =
-			src_tc_cfg->path[IXGBE_DCB_TX_CONFIG].bwg_percent;
+		if (dst->path[tx].bwg_percent != src->path[tx].bwg_percent) {
+			dst->path[tx].bwg_percent = src->path[tx].bwg_percent;
+			changes |= BIT_PG_TX;
+		}
 
-		dst_tc_cfg->path[IXGBE_DCB_TX_CONFIG].up_to_tc_bitmap =
-			src_tc_cfg->path[IXGBE_DCB_TX_CONFIG].up_to_tc_bitmap;
+		if (dst->path[tx].up_to_tc_bitmap !=
+		    src->path[tx].up_to_tc_bitmap) {
+			dst->path[tx].up_to_tc_bitmap =
+				src->path[tx].up_to_tc_bitmap;
+			changes |= (BIT_PG_TX | BIT_PFC | BIT_APP_UPCHG);
+		}
 
-		dst_tc_cfg->path[IXGBE_DCB_RX_CONFIG].tsa =
-			src_tc_cfg->path[IXGBE_DCB_RX_CONFIG].tsa;
+		if (dst->path[rx].tsa != src->path[rx].tsa) {
+			dst->path[rx].tsa = src->path[rx].tsa;
+			changes |= BIT_PG_RX;
+		}
 
-		dst_tc_cfg->path[IXGBE_DCB_RX_CONFIG].bwg_id =
-			src_tc_cfg->path[IXGBE_DCB_RX_CONFIG].bwg_id;
+		if (dst->path[rx].bwg_id != src->path[rx].bwg_id) {
+			dst->path[rx].bwg_id = src->path[rx].bwg_id;
+			changes |= BIT_PG_RX;
+		}
 
-		dst_tc_cfg->path[IXGBE_DCB_RX_CONFIG].bwg_percent =
-			src_tc_cfg->path[IXGBE_DCB_RX_CONFIG].bwg_percent;
+		if (dst->path[rx].bwg_percent != src->path[rx].bwg_percent) {
+			dst->path[rx].bwg_percent = src->path[rx].bwg_percent;
+			changes |= BIT_PG_RX;
+		}
 
-		dst_tc_cfg->path[IXGBE_DCB_RX_CONFIG].up_to_tc_bitmap =
-			src_tc_cfg->path[IXGBE_DCB_RX_CONFIG].up_to_tc_bitmap;
+		if (dst->path[rx].up_to_tc_bitmap !=
+		    src->path[rx].up_to_tc_bitmap) {
+			dst->path[rx].up_to_tc_bitmap =
+				src->path[rx].up_to_tc_bitmap;
+			changes |= (BIT_PG_RX | BIT_PFC | BIT_APP_UPCHG);
+		}
 	}
 
 	for (i = DCB_PG_ATTR_BW_ID_0; i < DCB_PG_ATTR_BW_ID_MAX; i++) {
-		dst_dcb_cfg->bw_percentage[IXGBE_DCB_TX_CONFIG]
-			[i-DCB_PG_ATTR_BW_ID_0] = src_dcb_cfg->bw_percentage
-				[IXGBE_DCB_TX_CONFIG][i-DCB_PG_ATTR_BW_ID_0];
-		dst_dcb_cfg->bw_percentage[IXGBE_DCB_RX_CONFIG]
-			[i-DCB_PG_ATTR_BW_ID_0] = src_dcb_cfg->bw_percentage
-				[IXGBE_DCB_RX_CONFIG][i-DCB_PG_ATTR_BW_ID_0];
+		j = i - DCB_PG_ATTR_BW_ID_0;
+
+		if (dcfg->bw_percentage[tx][j] != scfg->bw_percentage[tx][j]) {
+			dcfg->bw_percentage[tx][j] = scfg->bw_percentage[tx][j];
+			changes |= BIT_PG_TX;
+		}
+		if (dcfg->bw_percentage[rx][j] != scfg->bw_percentage[rx][j]) {
+			dcfg->bw_percentage[rx][j] = scfg->bw_percentage[rx][j];
+			changes |= BIT_PG_RX;
+		}
 	}
 
 	for (i = DCB_PFC_UP_ATTR_0; i < DCB_PFC_UP_ATTR_MAX; i++) {
-		dst_dcb_cfg->tc_config[i - DCB_PFC_UP_ATTR_0].pfc =
-			src_dcb_cfg->tc_config[i - DCB_PFC_UP_ATTR_0].pfc;
+		j = i - DCB_PFC_UP_ATTR_0;
+		if (dcfg->tc_config[j].pfc != scfg->tc_config[j].pfc) {
+			dcfg->tc_config[j].pfc = scfg->tc_config[j].pfc;
+			changes |= BIT_PFC;
+		}
 	}
-	dst_dcb_cfg->pfc_mode_enable = src_dcb_cfg->pfc_mode_enable;
 
-	return 0;
+	if (dcfg->pfc_mode_enable != scfg->pfc_mode_enable) {
+		dcfg->pfc_mode_enable = scfg->pfc_mode_enable;
+		changes |= BIT_PFC;
+	}
+
+	return changes;
 }
 
 static u8 ixgbe_dcbnl_get_state(struct net_device *netdev)
@@ -154,23 +149,21 @@ static u8 ixgbe_dcbnl_get_state(struct net_device *netdev)
 
 static u8 ixgbe_dcbnl_set_state(struct net_device *netdev, u8 state)
 {
-	u8 err = 0;
 	struct ixgbe_adapter *adapter = netdev_priv(netdev);
+	int err = 0;
 
 	/* Fail command if not in CEE mode */
 	if (!(adapter->dcbx_cap & DCB_CAP_DCBX_VER_CEE))
 		return 1;
 
 	/* verify there is something to do, if not then exit */
-	if (!!state != !(adapter->flags & IXGBE_FLAG_DCB_ENABLED))
-		return err;
+	if (!state == !(adapter->flags & IXGBE_FLAG_DCB_ENABLED))
+		goto out;
 
-	if (state > 0)
-		err = ixgbe_setup_tc(netdev, adapter->dcb_cfg.num_tcs.pg_tcs);
-	else
-		err = ixgbe_setup_tc(netdev, 0);
-
-	return err;
+	err = ixgbe_setup_tc(netdev,
+			     state ? adapter->dcb_cfg.num_tcs.pg_tcs : 0);
+out:
+	return !!err;
 }
 
 static void ixgbe_dcbnl_get_perm_hw_addr(struct net_device *netdev,
@@ -211,21 +204,6 @@ static void ixgbe_dcbnl_set_pg_tc_cfg_tx(struct net_device *netdev, int tc,
 	if (up_map != DCB_ATTR_VALUE_UNDEFINED)
 		adapter->temp_dcb_cfg.tc_config[tc].path[0].up_to_tc_bitmap =
 			up_map;
-
-	if ((adapter->temp_dcb_cfg.tc_config[tc].path[0].tsa !=
-	     adapter->dcb_cfg.tc_config[tc].path[0].tsa) ||
-	    (adapter->temp_dcb_cfg.tc_config[tc].path[0].bwg_id !=
-	     adapter->dcb_cfg.tc_config[tc].path[0].bwg_id) ||
-	    (adapter->temp_dcb_cfg.tc_config[tc].path[0].bwg_percent !=
-	     adapter->dcb_cfg.tc_config[tc].path[0].bwg_percent) ||
-	    (adapter->temp_dcb_cfg.tc_config[tc].path[0].up_to_tc_bitmap !=
-	     adapter->dcb_cfg.tc_config[tc].path[0].up_to_tc_bitmap))
-		adapter->dcb_set_bitmap |= BIT_PG_TX;
-
-	if (adapter->temp_dcb_cfg.tc_config[tc].path[0].up_to_tc_bitmap !=
-	     adapter->dcb_cfg.tc_config[tc].path[0].up_to_tc_bitmap)
-		adapter->dcb_set_bitmap |= BIT_PFC | BIT_APP_UPCHG;
-
 }
 
 static void ixgbe_dcbnl_set_pg_bwg_cfg_tx(struct net_device *netdev, int bwg_id,
@@ -234,10 +212,6 @@ static void ixgbe_dcbnl_set_pg_bwg_cfg_tx(struct net_device *netdev, int bwg_id,
 	struct ixgbe_adapter *adapter = netdev_priv(netdev);
 
 	adapter->temp_dcb_cfg.bw_percentage[0][bwg_id] = bw_pct;
-
-	if (adapter->temp_dcb_cfg.bw_percentage[0][bwg_id] !=
-	    adapter->dcb_cfg.bw_percentage[0][bwg_id])
-		adapter->dcb_set_bitmap |= BIT_PG_TX;
 }
 
 static void ixgbe_dcbnl_set_pg_tc_cfg_rx(struct net_device *netdev, int tc,
@@ -256,20 +230,6 @@ static void ixgbe_dcbnl_set_pg_tc_cfg_rx(struct net_device *netdev, int tc,
 	if (up_map != DCB_ATTR_VALUE_UNDEFINED)
 		adapter->temp_dcb_cfg.tc_config[tc].path[1].up_to_tc_bitmap =
 			up_map;
-
-	if ((adapter->temp_dcb_cfg.tc_config[tc].path[1].tsa !=
-	     adapter->dcb_cfg.tc_config[tc].path[1].tsa) ||
-	    (adapter->temp_dcb_cfg.tc_config[tc].path[1].bwg_id !=
-	     adapter->dcb_cfg.tc_config[tc].path[1].bwg_id) ||
-	    (adapter->temp_dcb_cfg.tc_config[tc].path[1].bwg_percent !=
-	     adapter->dcb_cfg.tc_config[tc].path[1].bwg_percent) ||
-	    (adapter->temp_dcb_cfg.tc_config[tc].path[1].up_to_tc_bitmap !=
-	     adapter->dcb_cfg.tc_config[tc].path[1].up_to_tc_bitmap))
-		adapter->dcb_set_bitmap |= BIT_PG_RX;
-
-	if (adapter->temp_dcb_cfg.tc_config[tc].path[1].up_to_tc_bitmap !=
-	     adapter->dcb_cfg.tc_config[tc].path[1].up_to_tc_bitmap)
-		adapter->dcb_set_bitmap |= BIT_PFC;
 }
 
 static void ixgbe_dcbnl_set_pg_bwg_cfg_rx(struct net_device *netdev, int bwg_id,
@@ -278,10 +238,6 @@ static void ixgbe_dcbnl_set_pg_bwg_cfg_rx(struct net_device *netdev, int bwg_id,
 	struct ixgbe_adapter *adapter = netdev_priv(netdev);
 
 	adapter->temp_dcb_cfg.bw_percentage[1][bwg_id] = bw_pct;
-
-	if (adapter->temp_dcb_cfg.bw_percentage[1][bwg_id] !=
-	    adapter->dcb_cfg.bw_percentage[1][bwg_id])
-		adapter->dcb_set_bitmap |= BIT_PG_RX;
 }
 
 static void ixgbe_dcbnl_get_pg_tc_cfg_tx(struct net_device *netdev, int tc,
@@ -324,33 +280,24 @@ static void ixgbe_dcbnl_get_pg_bwg_cfg_rx(struct net_device *netdev, int bwg_id,
 	*bw_pct = adapter->dcb_cfg.bw_percentage[1][bwg_id];
 }
 
-static void ixgbe_dcbnl_set_pfc_cfg(struct net_device *netdev, int priority,
-				    u8 setting)
+static void ixgbe_dcbnl_set_pfc_cfg(struct net_device *netdev, int up, u8 pfc)
 {
-	u8 tc = priority;
 	struct ixgbe_adapter *adapter = netdev_priv(netdev);
+	u8 tc = ixgbe_dcb_get_tc_from_up(&adapter->temp_dcb_cfg, 0, up);
 
-	tc = ixgbe_get_tc_from_up(netdev, priority);
-
-	adapter->temp_dcb_cfg.tc_config[tc].pfc = setting;
+	adapter->temp_dcb_cfg.tc_config[tc].pfc = pfc;
 	if (adapter->temp_dcb_cfg.tc_config[tc].pfc !=
-	    adapter->dcb_cfg.tc_config[tc].pfc) {
-		adapter->dcb_set_bitmap |= BIT_PFC;
+	    adapter->dcb_cfg.tc_config[tc].pfc)
 		adapter->temp_dcb_cfg.pfc_mode_enable = true;
-	}
 }
 
-static void ixgbe_dcbnl_get_pfc_cfg(struct net_device *netdev, int priority,
-				    u8 *setting)
+static void ixgbe_dcbnl_get_pfc_cfg(struct net_device *netdev, int up, u8 *pfc)
 {
-	u8 tc = priority;
 	struct ixgbe_adapter *adapter = netdev_priv(netdev);
-
-	tc = ixgbe_get_tc_from_up(netdev, priority);
-	*setting = adapter->dcb_cfg.tc_config[tc].pfc;
+	u8 tc = ixgbe_dcb_get_tc_from_up(&adapter->dcb_cfg, 0, up);
+	*pfc = adapter->dcb_cfg.tc_config[tc].pfc;
 }
 
-#ifdef IXGBE_FCOE
 static void ixgbe_dcbnl_devreset(struct net_device *dev)
 {
 	struct ixgbe_adapter *adapter = netdev_priv(dev);
@@ -377,54 +324,25 @@ static void ixgbe_dcbnl_devreset(struct net_device *dev)
 
 	clear_bit(__IXGBE_RESETTING, &adapter->state);
 }
-#endif
 
 static u8 ixgbe_dcbnl_set_all(struct net_device *netdev)
 {
 	struct ixgbe_adapter *adapter = netdev_priv(netdev);
-	int ret;
+	struct ixgbe_dcb_config *dcb_cfg = &adapter->dcb_cfg;
+	struct ixgbe_hw *hw = &adapter->hw;
+	int ret = DCB_NO_HW_CHG;
 	u8 prio_tc[IXGBE_DCB_MAX_USER_PRIORITY] = { 0 };
-	u8 pfc_en;
-
 
 	/* Fail command if not in CEE mode */
 	if (!(adapter->dcbx_cap & DCB_CAP_DCBX_VER_CEE))
-		return 1;
+		return ret;
 
-	ret = ixgbe_copy_dcb_cfg(&adapter->temp_dcb_cfg, &adapter->dcb_cfg,
-				 IXGBE_DCB_MAX_TRAFFIC_CLASS);
-	if (ret)
-		return DCB_NO_HW_CHG;
+	adapter->dcb_set_bitmap |= ixgbe_copy_dcb_cfg(adapter,
+						      IXGBE_DCB_MAX_TRAFFIC_CLASS);
+	if (!adapter->dcb_set_bitmap)
+		return ret;
 
-	if (adapter->dcb_cfg.pfc_mode_enable) {
-		switch (adapter->hw.mac.type) {
-		case ixgbe_mac_82599EB:
-		case ixgbe_mac_X540:
-			if (adapter->hw.fc.current_mode != ixgbe_fc_pfc)
-				adapter->last_lfc_mode =
-						  adapter->hw.fc.current_mode;
-			break;
-		default:
-			break;
-		}
-		adapter->hw.fc.requested_mode = ixgbe_fc_pfc;
-	} else {
-		switch (adapter->hw.mac.type) {
-		case ixgbe_mac_82598EB:
-			adapter->hw.fc.requested_mode = ixgbe_fc_none;
-			break;
-		case ixgbe_mac_82599EB:
-		case ixgbe_mac_X540:
-			adapter->hw.fc.requested_mode = adapter->last_lfc_mode;
-			break;
-		default:
-			break;
-		}
-	}
-
-	ixgbe_dcb_unpack_map_cee(&adapter->dcb_cfg,
-				 IXGBE_DCB_TX_CONFIG,
-				 prio_tc);
+	ixgbe_dcb_unpack_map_cee(dcb_cfg, IXGBE_DCB_TX_CONFIG, prio_tc);
 
 	if (adapter->dcb_set_bitmap & (BIT_PG_TX | BIT_PG_RX)) {
 		/* Priority to TC mapping in CEE case default to 1:1 */
@@ -438,41 +356,46 @@ static u8 ixgbe_dcbnl_set_all(struct net_device *netdev)
 			max_frame = max(max_frame, IXGBE_FCOE_JUMBO_FRAME_SIZE);
 #endif
 
-		ixgbe_dcb_calculate_tc_credits_cee(&adapter->hw,
-						   &adapter->dcb_cfg,
-						   max_frame,
+		ixgbe_dcb_calculate_tc_credits_cee(hw, dcb_cfg, max_frame,
 						   IXGBE_DCB_TX_CONFIG);
 
-		ixgbe_dcb_calculate_tc_credits_cee(&adapter->hw,
-						   &adapter->dcb_cfg,
-						   max_frame,
+		ixgbe_dcb_calculate_tc_credits_cee(hw, dcb_cfg, max_frame,
 						   IXGBE_DCB_RX_CONFIG);
 
-		ixgbe_dcb_hw_config_cee(&adapter->hw, &adapter->dcb_cfg);
+		ixgbe_dcb_hw_config_cee(hw, dcb_cfg);
 
 #ifdef HAVE_MQPRIO
 		for (i = 0; i < IEEE_8021QAZ_MAX_TCS; i++)
 			netdev_set_prio_tc_map(netdev, i, prio_tc[i]);
 #endif /* HAVE_MQPRIO */
+		ret = DCB_HW_CHG_RST;
 	}
 
 	if (adapter->dcb_set_bitmap & BIT_PFC) {
-		ixgbe_dcb_unpack_pfc_cee(&adapter->dcb_cfg, prio_tc, &pfc_en);
-		ixgbe_dcb_config_pfc(&adapter->hw, pfc_en, prio_tc);
-		ret = DCB_HW_CHG;
+		if (dcb_cfg->pfc_mode_enable) {
+			u8 pfc_en;
+			ixgbe_dcb_unpack_pfc_cee(dcb_cfg, prio_tc, &pfc_en);
+			ixgbe_dcb_config_pfc(hw, pfc_en, prio_tc);
+		} else {
+			hw->mac.ops.fc_enable(hw);
+		}
+		ixgbe_set_rx_drop_en(adapter);
+		if (ret != DCB_HW_CHG_RST)
+			ret = DCB_HW_CHG;
 	}
-
-	if (adapter->dcb_cfg.pfc_mode_enable)
-		adapter->hw.fc.current_mode = ixgbe_fc_pfc;
 
 #ifdef IXGBE_FCOE
-	if ((adapter->fcoe.up_set != adapter->fcoe.up) ||
-	    (adapter->dcb_set_bitmap & BIT_APP_UPCHG)) {
+	/* Reprogam FCoE hardware offloads when the traffic class
+	 * FCoE is using changes. This happens if the APP info
+	 * changes or the up2tc mapping is updated.
+	 */
+	if (adapter->dcb_set_bitmap & BIT_APP_UPCHG) {
 		adapter->fcoe.up_set = adapter->fcoe.up;
 		ixgbe_dcbnl_devreset(netdev);
+		ret = DCB_HW_CHG_RST;
 	}
-#endif /* IXGBE_FCOE */
 
+#endif /* IXGBE_FCOE */
 	adapter->dcb_set_bitmap = 0x00;
 	return ret;
 }
@@ -518,7 +441,11 @@ static u8 ixgbe_dcbnl_getcap(struct net_device *netdev, int capid, u8 *cap)
 	return 0;
 }
 
+#ifdef NUMTCS_RETURNS_U8
 static u8 ixgbe_dcbnl_getnumtcs(struct net_device *netdev, int tcid, u8 *num)
+#else
+static int ixgbe_dcbnl_getnumtcs(struct net_device *netdev, int tcid, u8 *num)
+#endif
 {
 	struct ixgbe_adapter *adapter = netdev_priv(netdev);
 	u8 rval = 0;
@@ -542,7 +469,11 @@ static u8 ixgbe_dcbnl_getnumtcs(struct net_device *netdev, int tcid, u8 *num)
 	return rval;
 }
 
+#ifdef NUMTCS_RETURNS_U8
 static u8 ixgbe_dcbnl_setnumtcs(struct net_device *netdev, int tcid, u8 num)
+#else
+static int ixgbe_dcbnl_setnumtcs(struct net_device *netdev, int tcid, u8 num)
+#endif
 {
 	struct ixgbe_adapter *adapter = netdev_priv(netdev);
 	u8 rval = 0;
@@ -578,9 +509,6 @@ static void ixgbe_dcbnl_setpfcstate(struct net_device *netdev, u8 state)
 	struct ixgbe_adapter *adapter = netdev_priv(netdev);
 
 	adapter->temp_dcb_cfg.pfc_mode_enable = state;
-	if (adapter->temp_dcb_cfg.pfc_mode_enable !=
-	    adapter->dcb_cfg.pfc_mode_enable)
-		adapter->dcb_set_bitmap |= BIT_PFC;
 	return;
 }
 
@@ -611,7 +539,7 @@ static u8 ixgbe_dcbnl_getapp(struct net_device *netdev, u8 idtype, u16 id)
 	case DCB_APP_IDTYPE_ETHTYPE:
 #ifdef IXGBE_FCOE
 		if (id == ETH_P_FCOE)
-			rval = ixgbe_fcoe_getapp(netdev_priv(netdev));
+			rval = ixgbe_fcoe_getapp(netdev);
 #endif
 		break;
 	case DCB_APP_IDTYPE_PORTNUM:
@@ -690,8 +618,9 @@ static int ixgbe_dcbnl_ieee_setets(struct net_device *dev,
 {
 	struct ixgbe_adapter *adapter = netdev_priv(dev);
 	int max_frame = dev->mtu + ETH_HLEN + ETH_FCS_LEN;
-	int i;
+	int i, err = 0;
 	__u8 max_tc = 0;
+	__u8 map_chg = 0;
 
 	if (!(adapter->dcbx_cap & DCB_CAP_DCBX_VER_IEEE))
 		return -EINVAL;
@@ -701,14 +630,24 @@ static int ixgbe_dcbnl_ieee_setets(struct net_device *dev,
 						  GFP_KERNEL);
 		if (!adapter->ixgbe_ieee_ets)
 			return -ENOMEM;
+		/* initialize UP2TC mappings to invalid value */
+		for (i = 0; i < IEEE_8021QAZ_MAX_TCS; i++)
+			adapter->ixgbe_ieee_ets->prio_tc[i] =
+				IEEE_8021QAZ_MAX_TCS;
+		/* if possible update UP2TC mappings from HW */
+		if (adapter->hw.mac.ops.get_rtrup2tc)
+			adapter->hw.mac.ops.get_rtrup2tc(&adapter->hw,
+					adapter->ixgbe_ieee_ets->prio_tc);
 	}
-
-	memcpy(adapter->ixgbe_ieee_ets, ets, sizeof(*adapter->ixgbe_ieee_ets));
 
 	for (i = 0; i < IEEE_8021QAZ_MAX_TCS; i++) {
 		if (ets->prio_tc[i] > max_tc)
 			max_tc = ets->prio_tc[i];
+		if (ets->prio_tc[i] != adapter->ixgbe_ieee_ets->prio_tc[i])
+			map_chg = 1;
 	}
+
+	memcpy(adapter->ixgbe_ieee_ets, ets, sizeof(*adapter->ixgbe_ieee_ets));
 
 	if (max_tc)
 		max_tc++;
@@ -717,12 +656,16 @@ static int ixgbe_dcbnl_ieee_setets(struct net_device *dev,
 		return -EINVAL;
 
 	if (max_tc != netdev_get_num_tc(dev))
-		ixgbe_setup_tc(dev, max_tc);
+		err = ixgbe_setup_tc(dev, max_tc);
+	else if (map_chg)
+		ixgbe_dcbnl_devreset(dev);
 
-	for (i = 0; i < IEEE_8021QAZ_MAX_TCS; i++)
-		netdev_set_prio_tc_map(dev, i, ets->prio_tc[i]);
+	if (err)
+		goto err_out;
 
-	return ixgbe_dcb_hw_ets(&adapter->hw, ets, max_frame);
+	err = ixgbe_dcb_hw_ets(&adapter->hw, ets, max_frame);
+err_out:
+	return err;
 }
 
 static int ixgbe_dcbnl_ieee_getpfc(struct net_device *dev,
@@ -753,7 +696,9 @@ static int ixgbe_dcbnl_ieee_setpfc(struct net_device *dev,
 				   struct ieee_pfc *pfc)
 {
 	struct ixgbe_adapter *adapter = netdev_priv(dev);
+	struct ixgbe_hw *hw = &adapter->hw;
 	u8 *prio_tc;
+	int err;
 
 	if (!(adapter->dcbx_cap & DCB_CAP_DCBX_VER_IEEE))
 		return -EINVAL;
@@ -768,7 +713,16 @@ static int ixgbe_dcbnl_ieee_setpfc(struct net_device *dev,
 	prio_tc = adapter->ixgbe_ieee_ets->prio_tc;
 	memcpy(adapter->ixgbe_ieee_pfc, pfc, sizeof(*adapter->ixgbe_ieee_pfc));
 
-	return ixgbe_dcb_config_pfc(&adapter->hw, pfc->pfc_en, prio_tc);
+
+	/* Enable link flow control parameters if PFC is disabled */
+	if (pfc->pfc_en)
+		err = ixgbe_dcb_config_pfc(hw, pfc->pfc_en, prio_tc);
+	else
+		err = hw->mac.ops.fc_enable(hw);
+
+	ixgbe_set_rx_drop_en(adapter);
+
+	return err;
 }
 
 static int ixgbe_dcbnl_ieee_setapp(struct net_device *dev,
@@ -819,7 +773,7 @@ static int ixgbe_dcbnl_ieee_delapp(struct net_device *dev,
 			return err;
 
 		adapter->fcoe.up = app_mask ?
-				   ffs(app_mask) - 1 : IXGBE_FCOE_DEFTC;
+				   ffs(app_mask) - 1 : IXGBE_FCOE_DEFUP;
 		ixgbe_dcbnl_devreset(dev);
 	}
 #endif

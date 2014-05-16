@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel 10 Gigabit PCI Express Linux driver
-  Copyright(c) 1999 - 2012 Intel Corporation.
+  Copyright(c) 1999 - 2013 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -27,6 +27,19 @@
 
 #include "ixgbe_api.h"
 #include "ixgbe_common.h"
+
+/**
+ * ixgbe_dcb_get_rtrup2tc - read rtrup2tc reg
+ * @hw: pointer to hardware structure
+ * @map: pointer to u8 arr for returning map
+ *
+ * Read the rtrup2tc HW register and resolve its content into map
+ **/
+void ixgbe_dcb_get_rtrup2tc(struct ixgbe_hw *hw, u8 *map)
+{
+	if (hw->mac.ops.get_rtrup2tc)
+		hw->mac.ops.get_rtrup2tc(hw, map);
+}
 
 /**
  *  ixgbe_init_shared_code - Initialize the shared code
@@ -78,48 +91,55 @@ s32 ixgbe_set_mac_type(struct ixgbe_hw *hw)
 {
 	s32 ret_val = 0;
 
-	if (hw->vendor_id == IXGBE_INTEL_VENDOR_ID) {
-		switch (hw->device_id) {
-		case IXGBE_DEV_ID_82598:
-		case IXGBE_DEV_ID_82598_BX:
-		case IXGBE_DEV_ID_82598AF_SINGLE_PORT:
-		case IXGBE_DEV_ID_82598AF_DUAL_PORT:
-		case IXGBE_DEV_ID_82598AT:
-		case IXGBE_DEV_ID_82598AT2:
-		case IXGBE_DEV_ID_82598EB_CX4:
-		case IXGBE_DEV_ID_82598_CX4_DUAL_PORT:
-		case IXGBE_DEV_ID_82598_DA_DUAL_PORT:
-		case IXGBE_DEV_ID_82598_SR_DUAL_PORT_EM:
-		case IXGBE_DEV_ID_82598EB_XF_LR:
-		case IXGBE_DEV_ID_82598EB_SFP_LOM:
-			hw->mac.type = ixgbe_mac_82598EB;
-			break;
-		case IXGBE_DEV_ID_82599_KX4:
-		case IXGBE_DEV_ID_82599_KX4_MEZZ:
-		case IXGBE_DEV_ID_82599_XAUI_LOM:
-		case IXGBE_DEV_ID_82599_COMBO_BACKPLANE:
-		case IXGBE_DEV_ID_82599_KR:
-		case IXGBE_DEV_ID_82599_SFP:
-		case IXGBE_DEV_ID_82599_BACKPLANE_FCOE:
-		case IXGBE_DEV_ID_82599_SFP_FCOE:
-		case IXGBE_DEV_ID_82599_SFP_EM:
-		case IXGBE_DEV_ID_82599_SFP_SF2:
-		case IXGBE_DEV_ID_82599_SFP_SF_QP:
-		case IXGBE_DEV_ID_82599EN_SFP:
-		case IXGBE_DEV_ID_82599_CX4:
-		case IXGBE_DEV_ID_82599_LS:
-		case IXGBE_DEV_ID_82599_T3_LOM:
-			hw->mac.type = ixgbe_mac_82599EB;
-			break;
-		case IXGBE_DEV_ID_X540T:
-			hw->mac.type = ixgbe_mac_X540;
-			break;
-		default:
-			ret_val = IXGBE_ERR_DEVICE_NOT_SUPPORTED;
-			break;
-		}
-	} else {
+	if (hw->vendor_id != IXGBE_INTEL_VENDOR_ID) {
+		ERROR_REPORT2(IXGBE_ERROR_UNSUPPORTED,
+			     "Unsupported vendor id: %x", hw->vendor_id);
+		return IXGBE_ERR_DEVICE_NOT_SUPPORTED;
+	}
+
+	switch (hw->device_id) {
+	case IXGBE_DEV_ID_82598:
+	case IXGBE_DEV_ID_82598_BX:
+	case IXGBE_DEV_ID_82598AF_SINGLE_PORT:
+	case IXGBE_DEV_ID_82598AF_DUAL_PORT:
+	case IXGBE_DEV_ID_82598AT:
+	case IXGBE_DEV_ID_82598AT2:
+	case IXGBE_DEV_ID_82598EB_CX4:
+	case IXGBE_DEV_ID_82598_CX4_DUAL_PORT:
+	case IXGBE_DEV_ID_82598_DA_DUAL_PORT:
+	case IXGBE_DEV_ID_82598_SR_DUAL_PORT_EM:
+	case IXGBE_DEV_ID_82598EB_XF_LR:
+	case IXGBE_DEV_ID_82598EB_SFP_LOM:
+		hw->mac.type = ixgbe_mac_82598EB;
+		break;
+	case IXGBE_DEV_ID_82599_KX4:
+	case IXGBE_DEV_ID_82599_KX4_MEZZ:
+	case IXGBE_DEV_ID_82599_XAUI_LOM:
+	case IXGBE_DEV_ID_82599_COMBO_BACKPLANE:
+	case IXGBE_DEV_ID_82599_KR:
+	case IXGBE_DEV_ID_82599_SFP:
+	case IXGBE_DEV_ID_82599_BACKPLANE_FCOE:
+	case IXGBE_DEV_ID_82599_SFP_FCOE:
+	case IXGBE_DEV_ID_82599_SFP_EM:
+	case IXGBE_DEV_ID_82599_SFP_SF2:
+	case IXGBE_DEV_ID_82599_SFP_SF_QP:
+	case IXGBE_DEV_ID_82599_QSFP_SF_QP:
+	case IXGBE_DEV_ID_82599EN_SFP:
+	case IXGBE_DEV_ID_82599_CX4:
+	case IXGBE_DEV_ID_82599_LS:
+	case IXGBE_DEV_ID_82599_T3_LOM:
+		hw->mac.type = ixgbe_mac_82599EB;
+		break;
+	case IXGBE_DEV_ID_X540T:
+	case IXGBE_DEV_ID_X540T1:
+		hw->mac.type = ixgbe_mac_X540;
+		break;
+	default:
 		ret_val = IXGBE_ERR_DEVICE_NOT_SUPPORTED;
+		ERROR_REPORT2(IXGBE_ERROR_UNSUPPORTED,
+			     "Unsupported device id: %x",
+			     hw->device_id);
+		break;
 	}
 
 	hw_dbg(hw, "ixgbe_set_mac_type found mac: %d, returns: %d\n",
@@ -461,16 +481,14 @@ s32 ixgbe_check_phy_link(struct ixgbe_hw *hw, ixgbe_link_speed *speed,
  *  ixgbe_setup_phy_link_speed - Set auto advertise
  *  @hw: pointer to hardware structure
  *  @speed: new link speed
- *  @autoneg: true if autonegotiation enabled
  *
  *  Sets the auto advertised capabilities
  **/
 s32 ixgbe_setup_phy_link_speed(struct ixgbe_hw *hw, ixgbe_link_speed speed,
-			       bool autoneg,
 			       bool autoneg_wait_to_complete)
 {
 	return ixgbe_call_func(hw, hw->phy.ops.setup_link_speed, (hw, speed,
-			       autoneg, autoneg_wait_to_complete),
+			       autoneg_wait_to_complete),
 			       IXGBE_NOT_IMPLEMENTED);
 }
 
@@ -530,17 +548,15 @@ void ixgbe_flap_tx_laser(struct ixgbe_hw *hw)
  *  ixgbe_setup_link - Set link speed
  *  @hw: pointer to hardware structure
  *  @speed: new link speed
- *  @autoneg: true if autonegotiation enabled
  *
  *  Configures link settings.  Restarts the link.
  *  Performs autonegotiation if needed.
  **/
 s32 ixgbe_setup_link(struct ixgbe_hw *hw, ixgbe_link_speed speed,
-		     bool autoneg,
 		     bool autoneg_wait_to_complete)
 {
 	return ixgbe_call_func(hw, hw->mac.ops.setup_link, (hw, speed,
-			       autoneg, autoneg_wait_to_complete),
+			       autoneg_wait_to_complete),
 			       IXGBE_NOT_IMPLEMENTED);
 }
 
@@ -767,6 +783,18 @@ s32 ixgbe_set_vmdq(struct ixgbe_hw *hw, u32 rar, u32 vmdq)
 {
 	return ixgbe_call_func(hw, hw->mac.ops.set_vmdq, (hw, rar, vmdq),
 			       IXGBE_NOT_IMPLEMENTED);
+
+}
+
+/**
+ *  ixgbe_set_vmdq_san_mac - Associate VMDq index 127 with a receive address
+ *  @hw: pointer to hardware structure
+ *  @vmdq: VMDq default pool index
+ **/
+s32 ixgbe_set_vmdq_san_mac(struct ixgbe_hw *hw, u32 vmdq)
+{
+	return ixgbe_call_func(hw, hw->mac.ops.set_vmdq_san_mac,
+			       (hw, vmdq), IXGBE_NOT_IMPLEMENTED);
 }
 
 /**
@@ -916,13 +944,12 @@ s32 ixgbe_set_vlvf(struct ixgbe_hw *hw, u32 vlan, u32 vind, bool vlan_on,
 /**
  *  ixgbe_fc_enable - Enable flow control
  *  @hw: pointer to hardware structure
- *  @packetbuf_num: packet buffer number (0-7)
  *
  *  Configures the flow control settings based on SW configuration.
  **/
-s32 ixgbe_fc_enable(struct ixgbe_hw *hw, s32 packetbuf_num)
+s32 ixgbe_fc_enable(struct ixgbe_hw *hw)
 {
-	return ixgbe_call_func(hw, hw->mac.ops.fc_enable, (hw, packetbuf_num),
+	return ixgbe_call_func(hw, hw->mac.ops.fc_enable, (hw),
 			       IXGBE_NOT_IMPLEMENTED);
 }
 
@@ -965,6 +992,8 @@ s32 ixgbe_init_thermal_sensor_thresh(struct ixgbe_hw *hw)
 	return ixgbe_call_func(hw, hw->mac.ops.init_thermal_sensor_thresh, (hw),
 				IXGBE_NOT_IMPLEMENTED);
 }
+
+
 /**
  *  ixgbe_read_analog_reg8 - Reads 8 bit analog register
  *  @hw: pointer to hardware structure
@@ -1081,7 +1110,7 @@ u32 ixgbe_get_supported_physical_layer(struct ixgbe_hw *hw)
 }
 
 /**
- *  ixgbe_enable_rx_dma - Enables Rx DMA unit, dependant on device specifics
+ *  ixgbe_enable_rx_dma - Enables Rx DMA unit, dependent on device specifics
  *  @hw: pointer to hardware structure
  *  @regval: bitfield to write to the Rx DMA register
  *

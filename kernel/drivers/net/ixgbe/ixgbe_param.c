@@ -1,7 +1,7 @@
 /*******************************************************************************
 
   Intel 10 Gigabit PCI Express Linux driver
-  Copyright(c) 1999 - 2012 Intel Corporation.
+  Copyright(c) 1999 - 2013 Intel Corporation.
 
   This program is free software; you can redistribute it and/or modify it
   under the terms and conditions of the GNU General Public License,
@@ -128,20 +128,18 @@ IXGBE_PARAM(MQ, "Disable or enable Multiple Queues, default 1");
 
 IXGBE_PARAM(DCA, "Disable or enable Direct Cache Access, 0=disabled, "
 	    "1=descriptor only, 2=descriptor and data");
-
 #endif
 /* RSS - Receive-Side Scaling (RSS) Descriptor Queues
  *
  * Valid Range: 0-16
- *  - 0 - disables RSS
- *  - 1 - enables RSS and sets the Desc. Q's to min(16, num_online_cpus()).
- *  - 2-16 - enables RSS and sets the Desc. Q's to the specified value.
+ *  - 0 - enables RSS and sets the Desc. Q's to min(16, num_online_cpus()).
+ *  - 1-16 - enables RSS and sets the Desc. Q's to the specified value.
  *
- * Default Value: 1
+ * Default Value: 0
  */
 
 IXGBE_PARAM(RSS, "Number of Receive-Side Scaling Descriptor Queues, "
-	    "default 1=number of cpus");
+	    "default 0=number of cpus");
 
 /* VMDQ - Virtual Machine Device Queues (VMDQ)
  *
@@ -162,8 +160,7 @@ IXGBE_PARAM(VMDQ, "Number of Virtual Machine Device Queues: 0/1 = disable, "
  *
  * Valid Range: 0-63
  *  - 0 Disables SR-IOV
- *  - 1 Enables SR-IOV to default number of VFs enabled
- *  - 2-63 - enables SR-IOV and sets the number of VFs enabled
+ *  - 1-63 - enables SR-IOV and sets the number of VFs enabled
  *
  * Default Value: 0
  */
@@ -171,7 +168,7 @@ IXGBE_PARAM(VMDQ, "Number of Virtual Machine Device Queues: 0/1 = disable, "
 #define MAX_SRIOV_VFS 63
 
 IXGBE_PARAM(max_vfs, "Number of Virtual Functions: 0 = disable (default), "
-	    "1 = default settings, 2-" XSTRINGIFY(MAX_SRIOV_VFS) " = enable "
+	    "1-" XSTRINGIFY(MAX_SRIOV_VFS) " = enable "
 	    "this many VFs");
 
 /* L2LBen - L2 Loopback enable
@@ -267,26 +264,9 @@ IXGBE_PARAM(LLIVLANP, "Low Latency Interrupt on VLAN priority threshold");
 
 #endif /* IXGBE_NO_LLI */
 #ifdef HAVE_TX_MQ
-/* Flow Director filtering mode
- *
- * Valid Range: 0-2  0 = off, 1 = Hashing (ATR), and 2 = perfect filters
- *
- * Default Value: 1 (ATR)
- */
-IXGBE_PARAM(FdirMode, "Flow Director filtering modes:\n"
-	    "\t\t\t0 = Filtering off\n"
-	    "\t\t\t1 = Signature Hashing filters (SW ATR)\n"
-	    "\t\t\t2 = Perfect Filters");
-
-#define IXGBE_FDIR_FILTER_OFF		0
-#define IXGBE_FDIR_FILTER_HASH		1
-#define IXGBE_FDIR_FILTER_PERFECT	2
-#define IXGBE_DEFAULT_FDIR_FILTER	IXGBE_FDIR_FILTER_HASH
-
 /* Flow Director packet buffer allocation level
  *
- * Valid Range: 0-3
- *   0 = No memory allocation,
+ * Valid Range: 1-3
  *   1 = 8k hash/2k perfect,
  *   2 = 16k hash/4k perfect,
  *   3 = 32k hash/8k perfect
@@ -312,6 +292,7 @@ IXGBE_PARAM(AtrSampleRate, "Software ATR Tx packet sample rate");
 #define IXGBE_MIN_ATR_SAMPLE_RATE	1
 #define IXGBE_ATR_SAMPLE_RATE_OFF	0
 #define IXGBE_DEFAULT_ATR_SAMPLE_RATE	20
+
 #endif /* HAVE_TX_MQ */
 #ifdef IXGBE_FCOE
 /* FCoE - Fibre Channel over Ethernet Offload  Enable/Disable
@@ -332,6 +313,15 @@ IXGBE_PARAM(FCoE, "Disable or enable FCoE Offload, default 1");
  * Default Value: 1
  */
 IXGBE_PARAM(LRO, "Large Receive Offload (0,1), default 1 = on");
+
+/* Enable/disable support for untested SFP+ modules on 82599-based adapters
+ *
+ * Valid Values: 0(Disable), 1(Enable)
+ *
+ * Default Value: 0
+ */
+IXGBE_PARAM(allow_unsupported_sfp, "Allow unsupported and untested "
+	    "SFP+ modules on 82599 based adapters, default 0 = Disable");
 
 struct ixgbe_option {
 	enum { enable_option, range_option, list_option } type;
@@ -419,6 +409,7 @@ void __devinit ixgbe_check_options(struct ixgbe_adapter *adapter)
 	int bd = adapter->bd_number;
 	u32 *aflags = &adapter->flags;
 	struct ixgbe_ring_feature *feature = adapter->ring_feature;
+	unsigned int vmdq;
 
 	if (bd >= IXGBE_MAX_NIC) {
 		printk(KERN_NOTICE
@@ -462,14 +453,12 @@ void __devinit ixgbe_check_options(struct ixgbe_adapter *adapter)
 					       "support unavailable\n");
 				} else {
 					*aflags &= ~IXGBE_FLAG_MSIX_CAPABLE;
-					*aflags &= ~IXGBE_FLAG_DCB_CAPABLE;
 				}
 				break;
 			case IXGBE_INT_LEGACY:
 			default:
 				*aflags &= ~IXGBE_FLAG_MSIX_CAPABLE;
 				*aflags &= ~IXGBE_FLAG_MSI_CAPABLE;
-				*aflags &= ~IXGBE_FLAG_DCB_CAPABLE;
 				break;
 			}
 #ifdef module_param_array
@@ -483,11 +472,9 @@ void __devinit ixgbe_check_options(struct ixgbe_adapter *adapter)
 			    *aflags & IXGBE_FLAG_MSI_CAPABLE) {
 				*aflags &= ~IXGBE_FLAG_MSIX_CAPABLE;
 				*aflags |= IXGBE_FLAG_MSI_CAPABLE;
-				*aflags &= ~IXGBE_FLAG_DCB_CAPABLE;
 			} else {
 				*aflags &= ~IXGBE_FLAG_MSIX_CAPABLE;
 				*aflags &= ~IXGBE_FLAG_MSI_CAPABLE;
-				*aflags &= ~IXGBE_FLAG_DCB_CAPABLE;
 			}
 		}
 #endif
@@ -574,65 +561,40 @@ void __devinit ixgbe_check_options(struct ixgbe_adapter *adapter)
 			.type = range_option,
 			.name = "Receive-Side Scaling (RSS)",
 			.err  = "using default.",
-			.def  = OPTION_ENABLED,
-			.arg  = { .r = { .min = OPTION_DISABLED,
-					 .max = IXGBE_MAX_RSS_INDICES} }
+			.def  = 0,
+			.arg  = { .r = { .min = 0,
+					 .max = 1} }
 		};
 		unsigned int rss = RSS[bd];
+		/* adjust Max allowed RSS queues based on MAC type */
+		opt.arg.r.max = ixgbe_max_rss_indices(adapter);
 
 #ifdef module_param_array
 		if (num_RSS > bd) {
 #endif
-			if (rss != OPTION_ENABLED)
-				ixgbe_validate_option(&rss, &opt);
-			/*
-			 * we cannot use an else since validate option may
-			 * have changed the state of RSS
-			 */
-			if (rss == OPTION_ENABLED) {
-				/*
-				 * Base it off num_online_cpus() with
-				 * a hardware limit cap.
-				 */
-				rss = min_t(int, IXGBE_MAX_RSS_INDICES,
+			ixgbe_validate_option(&rss, &opt);
+			/* base it off num_online_cpus() with hardware limit */
+			if (!rss)
+				rss = min_t(int, opt.arg.r.max,
 					    num_online_cpus());
-			}
-			feature[RING_F_RSS].indices = rss ? : 1;
-			if (rss)
-				*aflags |= IXGBE_FLAG_RSS_ENABLED;
 			else
-				*aflags &= ~IXGBE_FLAG_RSS_ENABLED;
+				feature[RING_F_FDIR].limit = rss;
+
+			feature[RING_F_RSS].limit = rss;
 #ifdef module_param_array
-		} else {
-			if (opt.def == OPTION_DISABLED) {
-				*aflags &= ~IXGBE_FLAG_RSS_ENABLED;
-			} else {
-				rss = min_t(int, IXGBE_MAX_RSS_INDICES,
-					    num_online_cpus());
-				feature[RING_F_RSS].indices = rss;
-				if (rss)
-					*aflags |= IXGBE_FLAG_RSS_ENABLED;
-				else
-					*aflags &= ~IXGBE_FLAG_RSS_ENABLED;
-			}
+		} else if (opt.def == 0) {
+			rss = min_t(int, ixgbe_max_rss_indices(adapter),
+				    num_online_cpus());
+			feature[RING_F_RSS].limit = rss;
 		}
 #endif
 		/* Check Interoperability */
-		if (*aflags & IXGBE_FLAG_RSS_ENABLED) {
-			if (!(*aflags & IXGBE_FLAG_RSS_CAPABLE)) {
+		if (rss > 1) {
+			if (!(*aflags & IXGBE_FLAG_MQ_CAPABLE)) {
 				DPRINTK(PROBE, INFO,
-					"RSS is not supported on this "
-					"hardware.  Disabling RSS.\n");
-				*aflags &= ~IXGBE_FLAG_RSS_ENABLED;
-				feature[RING_F_RSS].indices = 0;
-			} else if (!(*aflags & IXGBE_FLAG_MQ_CAPABLE)) {
-				DPRINTK(PROBE, INFO,
-					"RSS is not supported while multiple "
-					"queues are disabled.  "
-					"Disabling RSS.\n");
-				*aflags &= ~IXGBE_FLAG_RSS_ENABLED;
-				*aflags &= ~IXGBE_FLAG_DCB_CAPABLE;
-				feature[RING_F_RSS].indices = 0;
+					"Multiqueue is disabled.  "
+					"Limiting RSS.\n");
+				feature[RING_F_RSS].limit = 1;
 			}
 		}
 	}
@@ -647,56 +609,51 @@ void __devinit ixgbe_check_options(struct ixgbe_adapter *adapter)
 				} }
 		};
 
+		switch (adapter->hw.mac.type) {
+		case ixgbe_mac_82598EB:
+			/* 82598 only supports up to 16 pools */
+				opt.arg.r.max = 16;
+			break;
+		default:
+			break;
+		}
+
 #ifdef module_param_array
 		if (num_VMDQ > bd) {
 #endif
-			unsigned int vmdq = VMDQ[bd];
+			vmdq = VMDQ[bd];
+
 			ixgbe_validate_option(&vmdq, &opt);
-			feature[RING_F_VMDQ].indices = vmdq;
-			adapter->flags2 |= IXGBE_FLAG2_VMDQ_DEFAULT_OVERRIDE;
+
 			/* zero or one both mean disabled from our driver's
 			 * perspective */
-			if (vmdq > 1)
-				*aflags |= IXGBE_FLAG_VMDQ_ENABLED;
-			else
-				*aflags &= ~IXGBE_FLAG_VMDQ_ENABLED;
-#ifdef module_param_array
-		} else {
-			if (opt.def == OPTION_DISABLED) {
-				*aflags &= ~IXGBE_FLAG_VMDQ_ENABLED;
-			} else {
-				feature[RING_F_VMDQ].indices =
-							IXGBE_DEFAULT_NUM_VMDQ;
+			if (vmdq > 1) {
 				*aflags |= IXGBE_FLAG_VMDQ_ENABLED;
 			}
+			else
+				*aflags &= ~IXGBE_FLAG_VMDQ_ENABLED;
+
+			feature[RING_F_VMDQ].limit = vmdq;
+#ifdef module_param_array
+		} else {
+			if (opt.def == OPTION_DISABLED)
+				*aflags &= ~IXGBE_FLAG_VMDQ_ENABLED;
+			else
+				*aflags |= IXGBE_FLAG_VMDQ_ENABLED;
+
+			feature[RING_F_VMDQ].limit = opt.def;
 		}
 #endif
 		/* Check Interoperability */
 		if (*aflags & IXGBE_FLAG_VMDQ_ENABLED) {
-			if (!(*aflags & IXGBE_FLAG_VMDQ_CAPABLE)) {
-				DPRINTK(PROBE, INFO,
-					"VMDQ is not supported on this "
-					"hardware.  Disabling VMDQ.\n");
-				*aflags &= ~IXGBE_FLAG_VMDQ_ENABLED;
-				feature[RING_F_VMDQ].indices = 0;
-			} else if (!(*aflags & IXGBE_FLAG_MQ_CAPABLE)) {
+			if (!(*aflags & IXGBE_FLAG_MQ_CAPABLE)) {
 				DPRINTK(PROBE, INFO,
 					"VMDQ is not supported while multiple "
 					"queues are disabled.  "
 					"Disabling VMDQ.\n");
 				*aflags &= ~IXGBE_FLAG_VMDQ_ENABLED;
-				feature[RING_F_VMDQ].indices = 0;
+				feature[RING_F_VMDQ].limit = 0;
 			}
-
-			if  (adapter->hw.mac.type == ixgbe_mac_82598EB)
-				feature[RING_F_VMDQ].indices =
-					min(feature[RING_F_VMDQ].indices, 16);
-
-			/* Disable incompatible features */
-			*aflags &= ~IXGBE_FLAG_RSS_CAPABLE;
-			*aflags &= ~IXGBE_FLAG_RSS_ENABLED;
-			*aflags &= ~IXGBE_FLAG_DCB_CAPABLE;
-			*aflags &= ~IXGBE_FLAG_DCB_ENABLED;
 		}
 	}
 #ifdef CONFIG_PCI_IOV
@@ -707,15 +664,22 @@ void __devinit ixgbe_check_options(struct ixgbe_adapter *adapter)
 			.err  = "defaulting to Disabled",
 			.def  = OPTION_DISABLED,
 			.arg  = { .r = { .min = OPTION_DISABLED,
-					 .max = IXGBE_MAX_VF_FUNCTIONS} }
+					 .max = MAX_SRIOV_VFS} }
 		};
 
 #ifdef module_param_array
 		if (num_max_vfs > bd) {
 #endif
 			unsigned int vfs = max_vfs[bd];
-			ixgbe_validate_option(&vfs, &opt);
+			if (ixgbe_validate_option(&vfs, &opt)) {
+				vfs = 0;
+				DPRINTK(PROBE, INFO,
+					"max_vfs out of range "
+					"Disabling SR-IOV.\n");
+			}
+
 			adapter->num_vfs = vfs;
+
 			if (vfs)
 				*aflags |= IXGBE_FLAG_SRIOV_ENABLED;
 			else
@@ -747,10 +711,7 @@ void __devinit ixgbe_check_options(struct ixgbe_adapter *adapter)
 					"Disabling IOV.\n");
 				*aflags &= ~IXGBE_FLAG_SRIOV_ENABLED;
 				adapter->num_vfs = 0;
-			} else {
-				*aflags &= ~IXGBE_FLAG_RSS_CAPABLE;
-				adapter->flags2 &= ~IXGBE_FLAG2_RSC_CAPABLE;
-			}
+			} 
 		}
 	}
 	{ /* L2 Loopback Enable in SR-IOV mode */
@@ -960,74 +921,6 @@ void __devinit ixgbe_check_options(struct ixgbe_adapter *adapter)
 	}
 #endif /* IXGBE_NO_LLI */
 #ifdef HAVE_TX_MQ
-	{ /* Flow Director filtering mode */
-		unsigned int fdir_filter_mode;
-		static struct ixgbe_option opt = {
-			.type = range_option,
-			.name = "Flow Director filtering mode",
-			.err = "using default of "
-				__MODULE_STRING(IXGBE_DEFAULT_FDIR_FILTER),
-			.def = IXGBE_DEFAULT_FDIR_FILTER,
-			.arg = {.r = {.min = IXGBE_FDIR_FILTER_OFF,
-				      .max = IXGBE_FDIR_FILTER_PERFECT} }
-		};
-
-		*aflags &= ~IXGBE_FLAG_FDIR_HASH_CAPABLE;
-		*aflags &= ~IXGBE_FLAG_FDIR_PERFECT_CAPABLE;
-		feature[RING_F_FDIR].indices = IXGBE_MAX_FDIR_INDICES;
-
-		if (adapter->hw.mac.type == ixgbe_mac_82598EB)
-			goto no_flow_director;
-
-		if (num_FdirMode > bd) {
-			fdir_filter_mode = FdirMode[bd];
-			ixgbe_validate_option(&fdir_filter_mode, &opt);
-
-			switch (fdir_filter_mode) {
-			case IXGBE_FDIR_FILTER_PERFECT:
-#ifdef ETHTOOL_GRXRINGS
-				*aflags |= IXGBE_FLAG_FDIR_PERFECT_CAPABLE;
-				DPRINTK(PROBE, INFO, "Flow Director perfect "
-					"filtering enabled\n");
-#else /* ETHTOOL_GRXRINGS */
-				DPRINTK(PROBE, INFO, "No ethtool support for "
-					"Flow Director perfect filtering.\n");
-#endif /* ETHTOOL_GRXRINGS */
-				break;
-			case IXGBE_FDIR_FILTER_HASH:
-				*aflags |= IXGBE_FLAG_FDIR_HASH_CAPABLE;
-				DPRINTK(PROBE, INFO, "Flow Director hash "
-					"filtering enabled\n");
-				break;
-			case IXGBE_FDIR_FILTER_OFF:
-			default:
-				DPRINTK(PROBE, INFO, "Flow Director "
-					"disabled\n");
-				break;
-			}
-		} else {
-			*aflags |= IXGBE_FLAG_FDIR_HASH_CAPABLE;
-		}
-		/* Check interoperability */
-		if ((*aflags & (IXGBE_FLAG_FDIR_HASH_CAPABLE |
-		    IXGBE_FLAG_FDIR_PERFECT_CAPABLE)) &&
-		    !(*aflags & IXGBE_FLAG_MQ_CAPABLE)) {
-			DPRINTK(PROBE, INFO,
-				"Flow Director is not supported while "
-				"multiple queues are disabled. "
-				"Disabling Flow Director\n");
-			*aflags &= ~IXGBE_FLAG_FDIR_HASH_CAPABLE;
-			*aflags &= ~IXGBE_FLAG_FDIR_PERFECT_CAPABLE;
-		}
-
-		/* limit the number of queues for FDIR using RSS param */
-		if (feature[RING_F_RSS].indices && num_RSS > bd && RSS[bd])
-			feature[RING_F_FDIR].indices =
-						feature[RING_F_RSS].indices;
-
-no_flow_director:
-		/* empty code line with semi-colon */ ;
-	}
 	{ /* Flow Director packet buffer allocation */
 		unsigned int fdir_pballoc_mode;
 		static struct ixgbe_option opt = {
@@ -1041,25 +934,24 @@ no_flow_director:
 		};
 		char pstring[10];
 
-		if (adapter->hw.mac.type == ixgbe_mac_82598EB)
-			goto no_fdir_pballoc;
-		if (num_FdirPballoc > bd) {
+		if (adapter->hw.mac.type == ixgbe_mac_82598EB) {
+			adapter->fdir_pballoc = IXGBE_FDIR_PBALLOC_NONE;
+		} else if (num_FdirPballoc > bd) {
 			fdir_pballoc_mode = FdirPballoc[bd];
 			ixgbe_validate_option(&fdir_pballoc_mode, &opt);
 			switch (fdir_pballoc_mode) {
-			case IXGBE_FDIR_PBALLOC_64K:
-				adapter->fdir_pballoc = IXGBE_FDIR_PBALLOC_64K;
-				sprintf(pstring, "64kB");
+			case IXGBE_FDIR_PBALLOC_256K:
+				adapter->fdir_pballoc = IXGBE_FDIR_PBALLOC_256K;
+				sprintf(pstring, "256kB");
 				break;
 			case IXGBE_FDIR_PBALLOC_128K:
 				adapter->fdir_pballoc = IXGBE_FDIR_PBALLOC_128K;
 				sprintf(pstring, "128kB");
 				break;
-			case IXGBE_FDIR_PBALLOC_256K:
-				adapter->fdir_pballoc = IXGBE_FDIR_PBALLOC_256K;
-				sprintf(pstring, "256kB");
-				break;
+			case IXGBE_FDIR_PBALLOC_64K:
 			default:
+				adapter->fdir_pballoc = IXGBE_FDIR_PBALLOC_64K;
+				sprintf(pstring, "64kB");
 				break;
 			}
 			DPRINTK(PROBE, INFO, "Flow Director will be allocated "
@@ -1067,8 +959,6 @@ no_flow_director:
 		} else {
 			adapter->fdir_pballoc = opt.def;
 		}
-no_fdir_pballoc:
-		/* empty code line with semi-colon */ ;
 	}
 	{ /* Flow Director ATR Tx sample packet rate */
 		static struct ixgbe_option opt = {
@@ -1083,11 +973,9 @@ no_fdir_pballoc:
 		static const char atr_string[] =
 					    "ATR Tx Packet sample rate set to";
 
-		adapter->atr_sample_rate = IXGBE_ATR_SAMPLE_RATE_OFF;
-		if (adapter->hw.mac.type == ixgbe_mac_82598EB)
-			goto no_fdir_sample;
-
-		if (num_AtrSampleRate > bd) {
+		if (adapter->hw.mac.type == ixgbe_mac_82598EB) {
+			adapter->atr_sample_rate = IXGBE_ATR_SAMPLE_RATE_OFF;
+		} else if (num_AtrSampleRate > bd) {
 			adapter->atr_sample_rate = AtrSampleRate[bd];
 
 			if (adapter->atr_sample_rate) {
@@ -1099,8 +987,6 @@ no_fdir_pballoc:
 		} else {
 			adapter->atr_sample_rate = opt.def;
 		}
-no_fdir_sample:
-		/* empty code line with semi-colon */ ;
 	}
 #endif /* HAVE_TX_MQ */
 #ifdef IXGBE_FCOE
@@ -1129,11 +1015,6 @@ no_fdir_sample:
 				if (opt.def == OPTION_ENABLED)
 					*aflags |= IXGBE_FLAG_FCOE_CAPABLE;
 			}
-#endif
-#ifdef CONFIG_PCI_IOV
-			if (*aflags & (IXGBE_FLAG_SRIOV_ENABLED |
-				       IXGBE_FLAG_VMDQ_ENABLED))
-				*aflags &= ~IXGBE_FLAG_FCOE_CAPABLE;
 #endif
 			DPRINTK(PROBE, INFO, "FCoE Offload feature %sabled\n",
 				(*aflags & IXGBE_FLAG_FCOE_CAPABLE) ?
@@ -1183,7 +1064,35 @@ no_fdir_sample:
 				"hardware.  Disabling RSC.\n");
 			netdev->features &= ~NETIF_F_LRO;
 		}
+#endif /* IXGBE_NO_LRO */
+	}
+	{ /*
+	   * allow_unsupported_sfp - Enable/Disable support for unsupported
+	   * and untested SFP+ modules.
+	   */
+	struct ixgbe_option opt = {
+			.type = enable_option,
+			.name = "allow_unsupported_sfp",
+			.err  = "defaulting to Disabled",
+			.def  = OPTION_DISABLED
+		};
+#ifdef module_param_array
+		if (num_allow_unsupported_sfp > bd) {
+#endif
+			unsigned int enable_unsupported_sfp =
+						      allow_unsupported_sfp[bd];
+			ixgbe_validate_option(&enable_unsupported_sfp, &opt);
+			if (enable_unsupported_sfp) {
+				adapter->hw.allow_unsupported_sfp = true;
+			} else {
+				adapter->hw.allow_unsupported_sfp = false;
+			}
+#ifdef module_param_array
+		} else if (opt.def == OPTION_ENABLED) {
+				adapter->hw.allow_unsupported_sfp = true;
+		} else {
+				adapter->hw.allow_unsupported_sfp = false;
+		}
 #endif
 	}
 }
-
